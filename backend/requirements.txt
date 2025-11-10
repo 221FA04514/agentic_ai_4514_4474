@@ -3,19 +3,14 @@ uvicorn[standard]==0.29.0
 python-dotenv==1.0.1
 pydantic==2.6.4
 
-# Chroma version without Rust compiler requirement
+# NEW VERSIONS (Python 3.13 compatible)
 chromadb==0.4.24
-
-# LangChain safe versions
 langchain==0.1.20
 langchain-community==0.0.28
 langchain-text-splitters==0.0.2
 langchain-openai==0.1.7
-langchain-huggingface==0.0.3
-langchain-chroma==0.0.12
+langchain-huggingface==0.1.0
+langchain-chroma==0.1.2
 
-# Sentence transformers version without Rust
-sentence-transformers==2.2.2
-
-# PDF loader
-pypdf==4.1.0
+sentence-transformers==2.7.0
+pypdf==4.0.2
