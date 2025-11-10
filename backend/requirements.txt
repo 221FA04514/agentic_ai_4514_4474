@@ -1,9 +1,8 @@
 fastapi==0.110.0
 uvicorn[standard]==0.29.0
 python-dotenv==1.0.1
-pydantic==2.6.4
+pydantic==2.8.2
 
-# NEW VERSIONS (Python 3.13 compatible)
 chromadb==0.4.24
 langchain==0.1.20
 langchain-community==0.0.28
