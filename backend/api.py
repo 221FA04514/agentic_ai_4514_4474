@@ -1,92 +1,87 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from dotenv import load_dotenv
+import faiss
+import numpy as np
+import json
 import os
+from groq import Groq
+import base64
 
-# Load env vars
-load_dotenv()
+# Load FAISS index + metadata
+faiss_index = faiss.read_index("vector_store/index.faiss")
+with open("vector_store/meta.json", "r") as f:
+    metadata = json.load(f)
 
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_chroma import Chroma
-from langchain_community.llms import Ollama
+# Jina AI Embeddings (free)
+import requests
 
-# ✅ FastAPI App
+def embed(text):
+    r = requests.post(
+        "https://api.jina.ai/v1/embeddings",
+        headers={"Authorization": f"Bearer {os.getenv('JINA_API_KEY')}"},
+        json={"model": "jina-embeddings-v2-base-en", "input": text},
+    )
+    return np.array(r.json()["data"][0]["embedding"]).astype("float32")
+
+# Groq LLM
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
 app = FastAPI()
 
-# ✅ CORS for frontend (Render / Vercel)
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ✅ Embeddings
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-
-# ✅ Load Vector Store
-db = Chroma(
-    persist_directory="./policy_db",
-    embedding_function=embeddings
-)
-
-retriever = db.as_retriever()
-
-# ✅ LLM (changes automatically depending on Render env)
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-
-llm = Ollama(
-    model="llama3.1:8b",
-    base_url=OLLAMA_URL,
-    temperature=0.2,
-)
-
-# ✅ Request Body
 class AskBody(BaseModel):
     question: str
 
-# ✅ Main Route
 @app.post("/ask")
-def ask_question(body: AskBody):
-    question = body.question
+def ask(body: AskBody):
+    query_vector = embed(body.question).reshape(1, -1)
 
-    # Retrieve docs
-    docs = retriever.invoke(question)
-    context = "\n\n".join([d.page_content for d in docs])
+    # search top 3 chunks
+    scores, idx = faiss_index.search(query_vector, 3)
+
+    retrieved_texts = []
+    sources = []
+
+    for i in idx[0]:
+        if i == -1:
+            continue
+        chunk = metadata[str(i)]
+        retrieved_texts.append(chunk["text"])
+        sources.append({"file": chunk["source"], "page": chunk["page"]})
+
+    context = "\n\n".join(retrieved_texts)
 
     prompt = f"""
 You are a helpful assistant for parents.
+Answer using ONLY the provided context.
+If answer is not in context, say "Information not found in policy PDF."
 
-Use ONLY the context below.
-
-CONTEXT:
+Context:
 {context}
 
-QUESTION:
-{question}
+Question:
+{body.question}
 
-ANSWER:
+Answer:
 """
 
-    # Call LLM
-    response = llm.invoke(prompt)
+    chat = client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[{"role": "user", "content": prompt}]
+    )
 
-    # Collect sources
-    sources = []
-    for d in docs:
-        m = d.metadata or {}
-        sources.append({
-            "source": m.get("source", "document"),
-            "page": m.get("page")
-        })
+    answer = chat.choices[0].message.content
 
-    return {
-        "answer": response,
-        "sources": sources
-    }
+    return {"answer": answer, "sources": sources}
 
 @app.get("/")
-def health():
-    return {"message": "Backend running ✅"}
+def root():
+    return {"status": "Backend Running ✅"}
